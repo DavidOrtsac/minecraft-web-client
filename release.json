@@ -1,0 +1,5 @@
+{
+  "latestTag": "v2.0.1",
+  "changelog": "\n\n## [vv2.0.1](releases/tag/vv2.0.1) - 2026-06-13\n<!-- bump-type:patch -->\n### Bug Fixes\n\n- fix player entities animation regression [`c1d01be`](/commit/c1d01be2dd7abaa4899fe83dbfb5d79615bd62c3)",
+  "previousTag": "v2.0.0"
+}
