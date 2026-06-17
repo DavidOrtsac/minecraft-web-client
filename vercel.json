@@ -1,6 +1,10 @@
 {
     "github": {
-        "enabled": false,
+        "enabled": true,
         "silent": false
-    }
+    },
+    "framework": null,
+    "buildCommand": "CONFIG_JSON_SOURCE=BUNDLED pnpm build",
+    "outputDirectory": "dist",
+    "installCommand": "pnpm install --no-frozen-lockfile"
 }

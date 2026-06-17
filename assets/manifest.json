@@ -1,6 +1,6 @@
 {
-    "name": "Minecraft Web Client",
-    "short_name": "Minecraft Web Client",
+    "name": "TranscendiantMC",
+    "short_name": "TranscendiantMC",
     "scope": "./",
     "start_url": "./",
     "icons": [
