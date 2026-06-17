@@ -15,6 +15,7 @@
   "appParams": {
     "ip": "209.102.250.242",
     "proxy": "https://34-158-51-146.sslip.io",
+    "version": "1.21.8",
     "lockConnect": "true",
     "onlyConnect": "true"
   },
