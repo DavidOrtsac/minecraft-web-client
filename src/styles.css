@@ -231,6 +231,23 @@ body::xr-overlay #viewer-canvas {
   display: none;
 }
 
+/* iOS Safari (browser tab) black-bar fix: pin the canvas + scaled overlays to the
+   real visible height (--app-height, set from visualViewport in iosViewportFix.ts).
+   Touch only (pointer: coarse) so desktop layout is untouched. Override `bottom`
+   so the explicit height takes effect for the fixed canvas. See iosViewportFix.ts. */
+@media (pointer: coarse) {
+  html, body {
+    height: var(--app-height, 100dvh) !important;
+  }
+  #viewer-canvas {
+    bottom: auto !important;
+    height: var(--app-height, 100dvh) !important;
+  }
+  .overlay-top-scaled, .overlay-bottom-scaled {
+    height: calc(var(--app-height, 100dvh) / var(--guiScale)) !important;
+  }
+}
+
 .full-svg svg {
   width: 100%;
   height: 100%;

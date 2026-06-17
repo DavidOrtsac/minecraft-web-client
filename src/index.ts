@@ -1,6 +1,7 @@
 /* eslint-disable import/order */
 import './importsWorkaround'
 import './styles.css'
+import './iosViewportFix'
 import './testCrasher'
 import './globals'
 import './devtools'
