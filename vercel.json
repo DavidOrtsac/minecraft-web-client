@@ -4,7 +4,7 @@
         "silent": false
     },
     "framework": null,
-    "buildCommand": "CONFIG_JSON_SOURCE=BUNDLED pnpm build",
+    "buildCommand": "node scripts/downloadSoundsMap.mjs && CONFIG_JSON_SOURCE=BUNDLED pnpm build",
     "outputDirectory": "dist",
     "installCommand": "pnpm install --no-frozen-lockfile"
 }
