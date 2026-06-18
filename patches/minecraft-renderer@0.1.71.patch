@@ -1,8 +1,26 @@
 diff --git a/src/lib/worldrendererCommon.ts b/src/lib/worldrendererCommon.ts
-index f8749b8..6cf8194 100644
+index f8749b8..293be65 100644
 --- a/src/lib/worldrendererCommon.ts
 +++ b/src/lib/worldrendererCommon.ts
-@@ -425,13 +425,22 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+@@ -58,6 +58,17 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+   // loading sections (chunks)
+   sectionsWaiting = new Map<string, number>()
+ 
++  // webplay patch: reconciliation watchdog for stuck section meshes. A section can
++  // stay in sectionsWaiting forever when the column-mode mesher hits a build error
++  // and skips emitting its sectionFinished -- on initial load the column never
++  // completes (invisible), and on a block-update re-mesh the section goes blank and
++  // the chunk stays invisible with no timeout to rescue it. We timestamp each
++  // outstanding section and periodically re-dispatch a fresh mesh for any that
++  // stall, capped so a deterministically-failing section can't loop forever.
++  sectionWaitingSince = new Map<string, number>()
++  sectionRedispatchCount = new Map<string, number>()
++  private reconcileInterval: ReturnType<typeof setInterval> | null = null
++
+   queuedChunks = new Set<string>()
+   queuedFunctions = [] as Array<() => void>
+   // #endregion
+@@ -425,13 +436,24 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
      if (data.type === 'sectionFinished') { // on after load & unload section
        this.logWorkerWork(`<- ${data.workerIndex} sectionFinished ${data.key} ${JSON.stringify({ processTime: data.processTime })}`)
        if (!this.sectionsWaiting.has(data.key)) {
@@ -22,15 +40,74 @@ index f8749b8..6cf8194 100644
 +        // column-finished check so the column can still complete.
 +        console.debug(`sectionFinished for non-outstanding section ${data.key} (viewDistance=${this.viewDistance}) -- counting as finished`)
          this.finishedSections[data.key] = true
++        this.sectionWaitingSince.delete(data.key); this.sectionRedispatchCount.delete(data.key) // webplay patch
 +      } else {
 +        this.sectionsWaiting.set(data.key, this.sectionsWaiting.get(data.key)! - 1)
 +        if (this.sectionsWaiting.get(data.key) === 0) {
 +          this.sectionsWaiting.delete(data.key)
 +          this.finishedSections[data.key] = true
++          this.sectionWaitingSince.delete(data.key); this.sectionRedispatchCount.delete(data.key) // webplay patch
 +        }
        }
  
        const chunkCoords = data.key.split(',').map(Number)
+@@ -810,6 +832,7 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+         console.debug(`[removeColumn] clearing non-zero sectionsWaiting for ${sectionKey}: ${waitingCount} (chunk ${x},${z}, viewDistance=${this.viewDistance})`)
+       }
+       this.sectionsWaiting.delete(sectionKey)
++      this.sectionWaitingSince.delete(sectionKey); this.sectionRedispatchCount.delete(sectionKey) // webplay patch
+       delete this.finishedSections[sectionKey]
+     }
+     this.highestBlocksByChunks.delete(`${x},${z}`)
+@@ -1165,6 +1188,9 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+     // is always dispatched to the same worker
+     const hash = this.getWorkerNumber(pos, useChangeWorker && (this.mesherLogger.active || this.worldRendererConfig.dedicatedChangeWorker))
+     this.sectionsWaiting.set(key, (this.sectionsWaiting.get(key) ?? 0) + 1)
++    // webplay patch: track outstanding time + start the reconciliation watchdog
++    this.sectionWaitingSince.set(key, performance.now())
++    this.reconcileInterval ??= setInterval(() => this.reconcileStuckSections(), 1500)
+     if (this.forceCallFromMesherReplayer) {
+       this.workers[hash].postMessage({
+         type: 'dirty',
+@@ -1188,6 +1214,38 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+     }
+   }
+ 
++  // webplay patch: re-mesh sections that have stayed outstanding too long (the
++  // column-mode mesher hit a build error and skipped emitting their sectionFinished).
++  // Catches stuck initial-load columns AND block-update re-meshes that left a chunk
++  // blank. Bounded by a retry cap so a deterministically-failing section can't loop.
++  reconcileStuckSections() {
++    if (!this.active) {
++      if (this.reconcileInterval != null) { clearInterval(this.reconcileInterval); this.reconcileInterval = null }
++      return
++    }
++    if (this.sectionsWaiting.size === 0) return
++    const STUCK_MS = 2500
++    const MAX_RETRIES = 3
++    const now = performance.now()
++    for (const [key] of [...this.sectionsWaiting]) {
++      const since = this.sectionWaitingSince.get(key) ?? now
++      if (now - since < STUCK_MS) continue
++      const retries = this.sectionRedispatchCount.get(key) ?? 0
++      if (retries >= MAX_RETRIES) continue
++      const parts = key.split(',').map(Number)
++      if (parts.length !== 3 || parts.some(Number.isNaN)) continue
++      const [sx, sy, sz] = parts
++      if (!this.loadedChunks[`${sx},${sz}`]) continue // column data gone; nothing to re-mesh
++      // clear the stuck bookkeeping and re-dispatch a fresh mesh for this section
++      this.sectionsWaiting.delete(key)
++      this.sectionWaitingSince.delete(key)
++      delete this.finishedSections[key]
++      this.sectionRedispatchCount.set(key, retries + 1)
++      console.debug(`[reconcile] re-meshing stuck section ${key} (retry ${retries + 1}/${MAX_RETRIES})`)
++      this.setSectionDirty(new Vec3(sx, sy, sz), true)
++    }
++  }
++
+   dispatchMessages() {
+     if (this.queueAwaited) return
+     this.queueAwaited = true
 diff --git a/src/three/chunkMeshManager.ts b/src/three/chunkMeshManager.ts
 index e69de29..87b6bf9 100644
 --- a/src/three/chunkMeshManager.ts
