@@ -4,8 +4,8 @@ import {
 } from 'minecraft-renderer/src/graphicsBackend/rendererDefaultOptions'
 
 export const defaultOptions = {
-  renderDistance: 3,
-  multiplayerRenderDistance: 3,
+  renderDistance: 5,
+  multiplayerRenderDistance: 6,
   closeConfirmation: true,
   autoFullScreen: false,
   mouseRawInput: true,
