@@ -302,12 +302,8 @@ export default () => {
               onClick={async () => {
                 const platform = (navigator as any).userAgentData?.platform ?? navigator.platform
                 const body = `Version: ${window.location.hostname}\nServer: ${lastConnectOptions.value?.server ?? '<not a server>'}\nPlatform: ${platform}\nWebsite: ${window.location.href}`
-                const currentHost = window.location.hostname
                 const options = [
                   'GitHub (please use it if you can)',
-                  'Email',
-                  ...((currentHost === 'mcraft.fun' || currentHost === 'ru.mcraft.fun') ? ['Try Beta Version'] : []),
-                  // 'Use previous versions of client'
                 ]
                 const action = await showOptionsModal('Report client issue', options)
                 if (!action) return
@@ -315,20 +311,6 @@ export default () => {
                 switch (action) {
                   case 'GitHub (please use it if you can)':
                     openGithub(`/issues/new?body=${encodeURIComponent(body)}&title=${encodeURIComponent('[Bug Report] <describe your issue here>')}&labels=bug`)
-                    break
-                  case 'Email': {
-                    window.location.href = `mailto:support@mcraft.fun?body=${encodeURIComponent(body)}`
-                    break
-                  }
-                  case 'Try Beta Version': {
-                    if (currentHost === 'mcraft.fun') {
-                      window.location.href = 'https://s.mcraft.fun'
-                    }
-                    break
-                  }
-                  case 'Use previous versions of client':
-                    // TODO: Implement versions screen
-                    void showOptionsModal('Previous versions', [])
                     break
                 }
               }}

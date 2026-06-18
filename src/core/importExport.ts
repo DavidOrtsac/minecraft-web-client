@@ -188,7 +188,7 @@ export const exportData = async () => {
   })
   const fileName = `${data.profileName ? `${data.profileName}-` : ''}web-client-profile.json`
   const json: ExportedFile = {
-    _about: 'Minecraft Web Client (mcraft.fun) Profile',
+    _about: 'TranscendiantMC Profile',
     ...data.exportSettings ? {
       options: getChangedSettings(),
     } : {},
