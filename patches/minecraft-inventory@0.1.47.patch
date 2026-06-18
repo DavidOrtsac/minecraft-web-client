@@ -1,0 +1,62 @@
+diff --git a/src/connector/mineflayer.ts b/src/connector/mineflayer.ts
+index 64b1e49..cf842b0 100644
+--- a/src/connector/mineflayer.ts
++++ b/src/connector/mineflayer.ts
+@@ -819,43 +819,20 @@ export function createMineflayerConnector(bot: MineflayerBot, options?: Mineflay
+           onSetSlot()
+           logActionEvent('connector.action.success', action)
+         } else if (action.type === 'drag') {
+-          // bot.clickWindow() throws for mode=5 (prismarine-windows dragClick is unimplemented).
+-          // Send raw window_click packets directly via _client.write.
+-          if (!ext._client) {
+-            logActionEvent('connector.action.skipped', action, { reason: 'missing_client' })
+-            return
+-          }
+-          const isRight = action.button === 'right'
+-          const startButton = isRight ? 4 : 0
+-          const slotButton = isRight ? 5 : 1
+-          const endButton = isRight ? 6 : 2
+-          const windowId = bot.currentWindow ? bot.currentWindow.id : 0
+-          const cursorItem = { present: false } as any
+-  
+-          isDraggingRaw = true
+-          try {
+-            const writeClick = (slot: number, mouseButton: number) => {
+-              const packet = {
+-                windowId,
+-                stateId: dragStateId,
+-                slot,
+-                mouseButton,
+-                mode: 5,
+-                changedSlots: [],
+-                cursorItem,
+-              }
+-              logPacketWrite('window_click', packet)
+-              ext._client!.write('window_click', packet)
+-              dragStateId++
+-            }
+-    
+-            writeClick(-999, startButton)
+-            for (const slot of action.slots) {
+-              writeClick(slot, slotButton)
+-            }
+-            writeClick(-999, endButton)
+-          } finally {
+-            isDraggingRaw = false
++          // webplay patch: the original raw mode-5 drag packets used a locally
++          // incremented stateId that diverges from the server's during the rapid
++          // start/add/end sequence, so the server rejected the drag and re-synced,
++          // undoing it -- which is why drag-placing into the crafting grid never
++          // produced a result. prismarine-windows can't do mode-5, but it CAN do
++          // simple clicks (mode 0), which work reliably. Translate the drag into
++          // one deposit-one-item click (right button) per dragged slot. That is
++          // exactly right-drag semantics (1 item/slot) and is enough for crafting;
++          // left-drag even-split is approximated as 1-per-slot rather than left
++          // fully broken. Only this branch changes, so single-click is untouched.
++          const mouseButton = 1 // mode 0 + right button = deposit one from cursor
++          for (const slot of action.slots) {
++            logHelperIntent(action, 'bot.clickWindow', { slot, button: mouseButton, mode: 0 })
++            await bot.clickWindow(slot, mouseButton, 0)
+           }
+           logActionEvent('connector.action.success', action)
+         } else if (action.type === 'drop') {
