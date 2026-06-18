@@ -1,0 +1,33 @@
+diff --git a/src/lib/worldrendererCommon.ts b/src/lib/worldrendererCommon.ts
+index f8749b8..6cf8194 100644
+--- a/src/lib/worldrendererCommon.ts
++++ b/src/lib/worldrendererCommon.ts
+@@ -425,13 +425,22 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+     if (data.type === 'sectionFinished') { // on after load & unload section
+       this.logWorkerWork(`<- ${data.workerIndex} sectionFinished ${data.key} ${JSON.stringify({ processTime: data.processTime })}`)
+       if (!this.sectionsWaiting.has(data.key)) {
+-        console.debug(`sectionFinished for non-outstanding section ${data.key} (viewDistance=${this.viewDistance})`)
+-        return
+-      }
+-      this.sectionsWaiting.set(data.key, this.sectionsWaiting.get(data.key)! - 1)
+-      if (this.sectionsWaiting.get(data.key) === 0) {
+-        this.sectionsWaiting.delete(data.key)
++        // webplay patch: the mesher reported a section done that we are no longer
++        // tracking as outstanding (column-mode request tracking can drift and emit
++        // finishes for non-requested sections). Previously this was dropped, which
++        // left the column permanently one section short -> it never reached
++        // "finished" -> the chunk stayed invisible until the safety timeout. The
++        // mesher's geometry for this section IS ready, so treat the report as
++        // authoritative: mark the section finished and fall through to the
++        // column-finished check so the column can still complete.
++        console.debug(`sectionFinished for non-outstanding section ${data.key} (viewDistance=${this.viewDistance}) -- counting as finished`)
+         this.finishedSections[data.key] = true
++      } else {
++        this.sectionsWaiting.set(data.key, this.sectionsWaiting.get(data.key)! - 1)
++        if (this.sectionsWaiting.get(data.key) === 0) {
++          this.sectionsWaiting.delete(data.key)
++          this.finishedSections[data.key] = true
++        }
+       }
+ 
+       const chunkCoords = data.key.split(',').map(Number)
