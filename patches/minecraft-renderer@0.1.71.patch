@@ -1590,3 +1590,41 @@ index e69de29..87b6bf9 100644
 +    }
 +  }
 +}
+diff --git a/src/three/documentRenderer.ts b/src/three/documentRenderer.ts
+index 38fbd3c..74d8ec5 100644
+--- a/src/three/documentRenderer.ts
++++ b/src/three/documentRenderer.ts
+@@ -267,6 +267,10 @@ export class DocumentRenderer {
+     if (typeof window === 'undefined') return
+ 
+     let pixelRatio = window.devicePixelRatio || 1
++    // webplay patch: Potato mode caps the device pixel ratio (set by the kiosk via
++    // globalThis.__mcMaxPixelRatio). High-DPR phones render ~4-9x the pixels of a 1x
++    // screen on a weak GPU -- the single biggest low-end perf cost, with no setting.
++    pixelRatio = Math.min(pixelRatio, (globalThis as any).__mcMaxPixelRatio || Infinity)
+     if (!this.renderer.capabilities.isWebGL2) {
+       pixelRatio = 1 // WebGL1 has issues with high pixel ratio
+     }
+diff --git a/src/three/graphicsBackendOffThread.ts b/src/three/graphicsBackendOffThread.ts
+index 736c397..b631d18 100644
+--- a/src/three/graphicsBackendOffThread.ts
++++ b/src/three/graphicsBackendOffThread.ts
+@@ -37,7 +37,8 @@ export const createGraphicsBackendOffThread: GraphicsBackendLoader = async (init
+   const proxy = useWorkerProxy<WorkerType>(worker)
+   const canvas = addCanvasForWorker()
+   canvas.onSizeChanged((w, h) => {
+-    proxy.updateSizeExternal(w, h, window.devicePixelRatio || 1)
++    // webplay patch: Potato mode caps device pixel ratio (globalThis.__mcMaxPixelRatio)
++    proxy.updateSizeExternal(w, h, Math.min(window.devicePixelRatio || 1, (globalThis as any).__mcMaxPixelRatio || Infinity))
+   })
+ 
+   const preparedInitOptions = deepPrepareForTransfer(initOptions, worker)
+@@ -113,7 +114,7 @@ export const createGraphicsBackendOffThread: GraphicsBackendLoader = async (init
+         findProblemTransfer(prepared)
+         throw err
+       }
+-      proxy.updateSizeExternal(canvas.size.width, canvas.size.height, window.devicePixelRatio || 1)
++      proxy.updateSizeExternal(canvas.size.width, canvas.size.height, Math.min(window.devicePixelRatio || 1, (globalThis as any).__mcMaxPixelRatio || Infinity)) // webplay patch: Potato DPR cap
+ 
+ 
+       const fpsStat = addNewStat('fps')

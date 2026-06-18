@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { appQueryParams } from '../appParams'
 import { ConnectOptions } from '../connect'
+import { options } from '../optionsStorage'
 import { useIsModalActive } from './utilsApp'
 import Button from './Button'
 
@@ -12,10 +13,26 @@ import Button from './Button'
 
 const MINECRAFT_USERNAME_REGEX = /^\w{3,16}$/
 
+// Potato mode = opt-in low-end preset, applied at connect. Default OFF (the checkbox
+// resets to unchecked every visit), so "Play" is authoritative: ON applies the low
+// preset, OFF restores normal. The DPR cap (the biggest mobile win) is read by the
+// patched renderer via globalThis.__mcMaxPixelRatio.
+const POTATO_PRESET = { multiplayerRenderDistance: 3, renderDistance: 3, smoothLighting: false, loadPlayerSkins: false, viewBobbing: false, showHand: false, fov: 60 }
+const NORMAL_PRESET = { multiplayerRenderDistance: 6, renderDistance: 5, smoothLighting: true, loadPlayerSkins: true, viewBobbing: true, showHand: true, fov: 75 }
+
+const applyGraphicsPreset = (potato: boolean) => {
+  const preset = potato ? POTATO_PRESET : NORMAL_PRESET
+  const opts = options as unknown as Record<string, unknown>
+  for (const [k, v] of Object.entries(preset)) opts[k] = v
+  if (potato) (globalThis as any).__mcMaxPixelRatio = 1
+  else delete (globalThis as any).__mcMaxPixelRatio
+}
+
 export default () => {
   const { ip, version, proxy } = appQueryParams
   const isModalActive = useIsModalActive('only-connect-server')
   const [username, setUsername] = useState('')
+  const [potato, setPotato] = useState(false)
 
   if (!isModalActive) return null
 
@@ -24,6 +41,7 @@ export default () => {
 
   const handleConnect = () => {
     if (!isValid) return
+    applyGraphicsPreset(potato)
     const connectOptions: ConnectOptions = {
       username: trimmed,
       server: ip,
@@ -90,6 +108,24 @@ export default () => {
             3-16 letters, numbers, or underscores
           </div>
         )}
+        <label style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: 'lightgray',
+          fontSize: '12px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          width: '240px'
+        }}>
+          <input
+            type="checkbox"
+            checked={potato}
+            onChange={(e) => setPotato(e.target.checked)}
+            style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#5a8f3a' }}
+          />
+          <span>⚡ Potato mode <span style={{ color: 'gray' }}>(low-end / phone)</span></span>
+        </label>
         <Button
           type="submit"
           disabled={!isValid}
