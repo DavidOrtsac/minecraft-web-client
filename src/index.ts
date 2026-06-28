@@ -859,6 +859,17 @@ export async function connect (connectOptions: ConnectOptions) {
         void appViewer.worldView?.updatePosition(bot.entity.position)
       }
       bot.on('move', botPosition)
+      // webplay fix (stale-center-drops-teleport-chunks): a server teleport is a huge position
+      // jump but only fires the throttled non-forced 'move' path, so the renderer's viewDistance
+      // center lags and new-area chunks that arrive first are gated out ("teleport -> nothing
+      // loads"). Force-recenter on every teleport the same way login/respawn do: force=true runs
+      // updatePosition's chunk-changed branch unconditionally, advancing the center and reseeding
+      // the spiral synchronously with the teleport, before the new chunk packets are gated.
+      bot.on('forcedMove', () => {
+        appViewer.lastCamUpdate = Date.now()
+        appViewer.backend?.updateCamera(bot.entity.position, bot.entity.yaw, bot.entity.pitch)
+        void appViewer.worldView?.updatePosition(bot.entity.position, true)
+      })
       botPosition()
 
       progress.setMessage('Setting callbacks')

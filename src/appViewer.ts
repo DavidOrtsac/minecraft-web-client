@@ -163,25 +163,19 @@ const connectAppWorldViewToBot = () => {
         return
       }
       // keepChunksDistance buffer: servers (esp. with dynamic view-distance plugins like
-      // ViewDistanceTweaks) thrash their view distance and send unload_chunk for chunks still near
-      // the player, which makes loaded chunks flicker/disappear. Keep chunks within
-      // renderDistance + keepChunksDistance; only actually drop genuinely-distant ones.
+      // ViewDistanceTweaks) thrash their view distance and send unload_chunk for chunks still
+      // near the player, which makes loaded chunks flicker/disappear. Keep chunks within
+      // renderDistance + keepChunksDistance; only actually drop genuinely-distant ones. This is a
+      // pure O(1) keep-or-unload decision for the single chunk -- bounding the total loaded set is
+      // owned by WorldDataEmitter.updatePosition (driven from every bot 'move' in index.ts), which
+      // prunes columns past its own keepChunksDistance. (A prior O(N)-over-all-loadedChunks sweep
+      // here ran on EVERY near-unload event -> main-thread churn that compounded as the set grew,
+      // and it leaked old chunks after a teleport because it only fired on the near branch.)
       const keep = (miscUiState.singleplayer ? options.renderDistance : options.multiplayerRenderDistance) + (options.keepChunksDistance ?? 0)
       const pcx = Math.floor(bot.entity.position.x / 16)
       const pcz = Math.floor(bot.entity.position.z / 16)
-      const chunkDist = (bx: number, bz: number) => Math.max(Math.abs(Math.floor(bx / 16) - pcx), Math.abs(Math.floor(bz / 16) - pcz))
-      if (chunkDist(pos.x, pos.z) <= keep) {
-        // chunk is still near the player -> keep it, but sweep genuinely-far chunks so memory stays bounded
-        for (const key of Object.keys(wv.loadedChunks)) {
-          const comma = key.indexOf(',')
-          const bx = Number(key.slice(0, comma))
-          const bz = Number(key.slice(comma + 1))
-          if (chunkDist(bx, bz) > keep) {
-            wv.unloadChunk(new Vec3(bx, 0, bz))
-          }
-        }
-        return
-      }
+      const chunkDist = Math.max(Math.abs(Math.floor(pos.x / 16) - pcx), Math.abs(Math.floor(pos.z / 16) - pcz))
+      if (chunkDist <= keep) return // still near the player -> suppress the server unload (anti-flicker)
       wv.unloadChunk(pos)
     },
     blockUpdate (oldBlock: any, newBlock: any) {

@@ -1,5 +1,5 @@
 diff --git a/src/lib/worldrendererCommon.ts b/src/lib/worldrendererCommon.ts
-index f8749b8..293be65 100644
+index f8749b8..3b0bbb8 100644
 --- a/src/lib/worldrendererCommon.ts
 +++ b/src/lib/worldrendererCommon.ts
 @@ -58,6 +58,17 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
@@ -59,7 +59,28 @@ index f8749b8..293be65 100644
        delete this.finishedSections[sectionKey]
      }
      this.highestBlocksByChunks.delete(`${x},${z}`)
-@@ -1165,6 +1188,9 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+@@ -1102,8 +1125,18 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+     if (this.viewDistance === -1) throw new Error('viewDistance not set')
+ 
+     const distance = this.getDistance(pos)
+-    // todo shouldnt we check loadedChunks instead?
+-    if (!this.workers.length || distance[0] > this.viewDistance || distance[1] > this.viewDistance) return
++    // webplay fix (gate-drops-never-dispatched-sections): the original gate silently dropped
++    // any section momentarily beyond viewDistance from the camera center. During movement /
++    // teleport the center races ahead of arriving chunks, so freshly-loaded columns were never
++    // dispatched -- and were invisible to reconcileStuckSections (which only rescues already-
++    // tracked sections), so they never recovered ("chunks stop loading"). Implement the
++    // maintainer's own TODO above: a column the worldView chose to load (loadedChunks[x,z], set
++    // in addColumn BEFORE its setSectionDirty loop) is meshed regardless of where the center
++    // moved to. This is bounded -- setSectionDirty is called once per column load / block-edit /
++    // reconcile, not per frame -- and the worldView already bounds loadedChunks via its prune.
++    const colKey = `${Math.floor(pos.x / 16) * 16},${Math.floor(pos.z / 16) * 16}`
++    const withinView = distance[0] <= this.viewDistance && distance[1] <= this.viewDistance
++    if (!this.workers.length || (!withinView && !this.loadedChunks[colKey])) return
+ 
+     // When unloading chunks (value=false) — always immediate, no throttle
+     if (!value) {
+@@ -1165,6 +1198,9 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
      // is always dispatched to the same worker
      const hash = this.getWorkerNumber(pos, useChangeWorker && (this.mesherLogger.active || this.worldRendererConfig.dedicatedChangeWorker))
      this.sectionsWaiting.set(key, (this.sectionsWaiting.get(key) ?? 0) + 1)
@@ -69,7 +90,7 @@ index f8749b8..293be65 100644
      if (this.forceCallFromMesherReplayer) {
        this.workers[hash].postMessage({
          type: 'dirty',
-@@ -1188,6 +1214,38 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+@@ -1188,6 +1224,87 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
      }
    }
  
@@ -83,26 +104,75 @@ index f8749b8..293be65 100644
 +      return
 +    }
 +    if (this.sectionsWaiting.size === 0) return
-+    const STUCK_MS = 2500
++    // webplay fix (reconcile-redispatch-flood): the watchdog cannot tell a SLOW section (mesher
++    // merely backed up) from a STUCK one (finish genuinely dropped). Re-dispatching while the
++    // single worker is busy floods it with duplicate jobs + redundant GPU churn -> positive
++    // feedback that stalls movement/teleport. So only act once the pipeline is otherwise idle
++    // (inbound queue drained, outstanding set small) -- exactly the condition where a truly
++    // dropped finish is distinguishable from slowness -- and cap re-dispatches per sweep.
++    const STUCK_MS = 5000
 +    const MAX_RETRIES = 3
++    const RECONCILE_MAX_BACKLOG = 48
++    const MAX_REDISPATCH_PER_SWEEP = 6
++    if (this.messageQueue.length > 0 || this.sectionsWaiting.size > RECONCILE_MAX_BACKLOG) return
 +    const now = performance.now()
-+    for (const [key] of [...this.sectionsWaiting]) {
++    // collect genuinely-stuck candidates, then handle nearest-camera-first so the player's
++    // immediate surroundings recover before the keepChunksDistance ring.
++    const stuck = [] as Array<{ key: string, sx: number, sy: number, sz: number, retries: number }>
++    for (const [key] of this.sectionsWaiting) {
 +      const since = this.sectionWaitingSince.get(key) ?? now
 +      if (now - since < STUCK_MS) continue
-+      const retries = this.sectionRedispatchCount.get(key) ?? 0
-+      if (retries >= MAX_RETRIES) continue
 +      const parts = key.split(',').map(Number)
 +      if (parts.length !== 3 || parts.some(Number.isNaN)) continue
 +      const [sx, sy, sz] = parts
 +      if (!this.loadedChunks[`${sx},${sz}`]) continue // column data gone; nothing to re-mesh
-+      // clear the stuck bookkeeping and re-dispatch a fresh mesh for this section
-+      this.sectionsWaiting.delete(key)
-+      this.sectionWaitingSince.set(key, now) // webplay fix: reset stuck clock (don't delete) so a re-dropped finish is retried next sweep, bounded by MAX_RETRIES
-+      delete this.finishedSections[key]
-+      this.sectionRedispatchCount.set(key, retries + 1)
-+      console.debug(`[reconcile] re-meshing stuck section ${key} (retry ${retries + 1}/${MAX_RETRIES})`)
-+      this._dispatchDirtyImmediate(new Vec3(sx, sy, sz), true, false) // webplay fix: dispatch directly. setSectionDirty() early-returns when a column is past viewDistance, but keepChunksDistance keeps columns loaded in a ring BEYOND viewDistance -- that no-op left the section neither waiting nor finished, so the column never finished and the WASM batch gate hid it forever.
++      stuck.push({ key, sx, sy, sz, retries: this.sectionRedispatchCount.get(key) ?? 0 })
 +    }
++    if (stuck.length === 0) return
++    stuck.sort((a, b) =>
++      Math.max(...this.getDistance(new Vec3(a.sx, a.sy, a.sz))) - Math.max(...this.getDistance(new Vec3(b.sx, b.sy, b.sz))))
++    let dispatched = 0
++    for (const s of stuck) {
++      if (s.retries >= MAX_RETRIES) {
++        // webplay fix (max-retries-permanent-stuck-no-giveup): give up TOWARD VISIBLE instead of
++        // leaving the section forever in sectionsWaiting (which keeps the whole column out of
++        // finishedChunks, so the WASM batch gate hides it permanently and the bookkeeping maps
++        // leak). Mark it finished and try to complete the column -> it reveals with at most one
++        // blank section rather than a fully invisible chunk.
++        this.sectionsWaiting.delete(s.key)
++        this.sectionWaitingSince.delete(s.key)
++        this.sectionRedispatchCount.delete(s.key)
++        this.finishedSections[s.key] = true
++        this.tryFinishColumn(s.sx, s.sz)
++        continue
++      }
++      if (dispatched >= MAX_REDISPATCH_PER_SWEEP) continue
++      dispatched++
++      // clear the stuck bookkeeping and re-dispatch a fresh mesh for this section
++      this.sectionsWaiting.delete(s.key)
++      this.sectionWaitingSince.set(s.key, now) // reset clock (don't delete) so a re-dropped finish is retried next sweep, bounded by MAX_RETRIES
++      delete this.finishedSections[s.key]
++      this.sectionRedispatchCount.set(s.key, s.retries + 1)
++      console.debug(`[reconcile] re-meshing stuck section ${s.key} (retry ${s.retries + 1}/${MAX_RETRIES})`)
++      this._dispatchDirtyImmediate(new Vec3(s.sx, s.sy, s.sz), true, false)
++    }
++  }
++
++  // webplay fix: complete a column if all its sections are finished (mirrors the column-finished
++  // path in the sectionFinished handler) so the reconcile give-up branch can reveal the chunk.
++  tryFinishColumn(chunkX: number, chunkZ: number) {
++    const chunkKey = `${chunkX},${chunkZ}`
++    if (!this.loadedChunks[chunkKey] || this.finishedChunks[chunkKey]) return
++    const sectionHeight = this.getSectionHeight()
++    for (let y = this.worldMinYRender; y < this.worldSizeParams.worldHeight; y += sectionHeight) {
++      if (!this.finishedSections[`${chunkX},${y},${chunkZ}`]) return
++    }
++    this.finishedChunks[chunkKey] = true
++    const CHUNK_SIZE = 16
++    const gridKey = `${Math.floor(chunkX / CHUNK_SIZE)},${Math.floor(chunkZ / CHUNK_SIZE)}`
++    this.reactiveState.world.chunksLoaded[gridKey] = true
++    this.renderUpdateEmitter.emit(`chunkFinished`, `${chunkX},${chunkZ}`)
++    this.checkAllFinished()
 +  }
 +
    dispatchMessages() {
