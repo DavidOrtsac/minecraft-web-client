@@ -870,6 +870,31 @@ export async function connect (connectOptions: ConnectOptions) {
         appViewer.backend?.updateCamera(bot.entity.position, bot.entity.yaw, bot.entity.pitch)
         void appViewer.worldView?.updatePosition(bot.entity.position, true)
       })
+
+      // webplay perf probe: window.mcChunkStats() returns the counters that reveal a
+      // distance-proportional climb. Run it before vs after a long walk -- whichever number
+      // keeps growing is the culprit. Add ?perfstats=1 to the URL to auto-log every 5s.
+      const mcChunkStats = () => {
+        const be = appViewer.backend as any
+        const wv = appViewer.worldView as any
+        const mem = (performance as any).memory
+        const count = (o: any) => (o ? Object.keys(o).length : 0)
+        return {
+          loadedChunks: count(wv?.loadedChunks),
+          chunksLoadedReactive: count(appViewer.rendererState?.world?.chunksLoaded),
+          sectionObjects: count(be?.sectionObjects),
+          sectionsWaiting: be?.sectionsWaiting?.size ?? 0,
+          sceneTracked: be?.sceneOrigin?.trackedCount ?? be?.sceneOrigin?._tracked?.size ?? 0,
+          chunkReceiveTimes: wv?.chunkReceiveTimes?.length ?? 0,
+          entities: count(bot?.entities),
+          jsHeapMB: mem ? Math.round(mem.usedJSHeapSize / 1_048_576) : null,
+        }
+      }
+      ;(window as any).mcChunkStats = mcChunkStats
+      if (new URLSearchParams(location.search).get('perfstats') === '1' && !(window as any).__mcPerfStatsOn) {
+        ;(window as any).__mcPerfStatsOn = true
+        setInterval(() => console.log('[mcChunkStats]', JSON.stringify(mcChunkStats())), 5000)
+      }
       botPosition()
 
       progress.setMessage('Setting callbacks')

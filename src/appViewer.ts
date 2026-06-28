@@ -138,11 +138,14 @@ const connectAppWorldViewToBot = () => {
     },
     entityGone (e: any) {
       appViewer.worldView?.emit('entity', { id: e.id, delete: true })
+      entitiesObjectData.delete(e.id) // webplay fix (entity-leak): was never cleared, grew with every mob spawned while exploring (GC pressure that worsens with distance, resets on relogin)
     },
     chunkColumnLoad (pos: Vec3) {
       const now = performance.now()
       if (appViewer.worldView?.lastChunkReceiveTime) {
-        appViewer.worldView.chunkReceiveTimes.push(now - appViewer.worldView.lastChunkReceiveTime)
+        const times = appViewer.worldView.chunkReceiveTimes
+        times.push(now - appViewer.worldView.lastChunkReceiveTime)
+        if (times.length > 200) times.shift() // webplay fix: this array is never read/trimmed -> grew one entry per chunk loaded forever; cap it
       }
       appViewer.worldView!.lastChunkReceiveTime = now
 

@@ -1,5 +1,5 @@
 diff --git a/src/lib/worldrendererCommon.ts b/src/lib/worldrendererCommon.ts
-index f8749b8..3b0bbb8 100644
+index f8749b8..3341bd4 100644
 --- a/src/lib/worldrendererCommon.ts
 +++ b/src/lib/worldrendererCommon.ts
 @@ -58,6 +58,17 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
@@ -51,7 +51,7 @@ index f8749b8..3b0bbb8 100644
        }
  
        const chunkCoords = data.key.split(',').map(Number)
-@@ -810,6 +832,7 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+@@ -810,11 +832,17 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
          console.debug(`[removeColumn] clearing non-zero sectionsWaiting for ${sectionKey}: ${waitingCount} (chunk ${x},${z}, viewDistance=${this.viewDistance})`)
        }
        this.sectionsWaiting.delete(sectionKey)
@@ -59,7 +59,17 @@ index f8749b8..3b0bbb8 100644
        delete this.finishedSections[sectionKey]
      }
      this.highestBlocksByChunks.delete(`${x},${z}`)
-@@ -1102,8 +1125,18 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+     const heightmapKey = `${Math.floor(x / 16)},${Math.floor(z / 16)}`
+     delete this.reactiveState.world.heightmaps[heightmapKey]
++    // webplay fix (chunksLoaded-leak): chunksLoaded is set per finished chunk (in the
++    // sectionFinished handler + tryFinishColumn) but was never deleted here, so this reactive
++    // map grew unbounded with every chunk ever visited and was only reset on relogin -- a
++    // distance-proportional leak. Delete it alongside heightmaps (same gridKey format).
++    delete this.reactiveState.world.chunksLoaded[heightmapKey]
+ 
+     this.updateChunksStats()
+ 
+@@ -1102,8 +1130,18 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
      if (this.viewDistance === -1) throw new Error('viewDistance not set')
  
      const distance = this.getDistance(pos)
@@ -80,7 +90,7 @@ index f8749b8..3b0bbb8 100644
  
      // When unloading chunks (value=false) — always immediate, no throttle
      if (!value) {
-@@ -1165,6 +1198,9 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+@@ -1165,6 +1203,9 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
      // is always dispatched to the same worker
      const hash = this.getWorkerNumber(pos, useChangeWorker && (this.mesherLogger.active || this.worldRendererConfig.dedicatedChangeWorker))
      this.sectionsWaiting.set(key, (this.sectionsWaiting.get(key) ?? 0) + 1)
@@ -90,7 +100,7 @@ index f8749b8..3b0bbb8 100644
      if (this.forceCallFromMesherReplayer) {
        this.workers[hash].postMessage({
          type: 'dirty',
-@@ -1188,6 +1224,87 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+@@ -1188,6 +1229,87 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
      }
    }
  
@@ -178,6 +188,14 @@ index f8749b8..3b0bbb8 100644
    dispatchMessages() {
      if (this.queueAwaited) return
      this.queueAwaited = true
+@@ -1281,6 +1403,7 @@ export abstract class WorldRendererCommon<WorkerSend = any, WorkerReceive = any>
+     this.loadedChunks = {}
+     this.finishedChunks = {}
+     this.finishedSections = {}
++    this.reactiveState.world.chunksLoaded = {} // webplay fix (chunksLoaded-leak): reset the reactive map on world switch too
+     this.sectionsWaiting.clear()
+     this.queuedChunks.clear()
+     this.blockStateModelInfo.clear()
 diff --git a/src/three/chunkMeshManager.ts b/src/three/chunkMeshManager.ts
 index e69de29..87b6bf9 100644
 --- a/src/three/chunkMeshManager.ts
