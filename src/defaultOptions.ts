@@ -6,6 +6,7 @@ import {
 export const defaultOptions = {
   renderDistance: 5,
   multiplayerRenderDistance: 6,
+  keepChunksDistance: 3,
   closeConfirmation: true,
   autoFullScreen: false,
   mouseRawInput: true,

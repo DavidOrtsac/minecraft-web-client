@@ -97,11 +97,11 @@ index f8749b8..293be65 100644
 +      if (!this.loadedChunks[`${sx},${sz}`]) continue // column data gone; nothing to re-mesh
 +      // clear the stuck bookkeeping and re-dispatch a fresh mesh for this section
 +      this.sectionsWaiting.delete(key)
-+      this.sectionWaitingSince.delete(key)
++      this.sectionWaitingSince.set(key, now) // webplay fix: reset stuck clock (don't delete) so a re-dropped finish is retried next sweep, bounded by MAX_RETRIES
 +      delete this.finishedSections[key]
 +      this.sectionRedispatchCount.set(key, retries + 1)
 +      console.debug(`[reconcile] re-meshing stuck section ${key} (retry ${retries + 1}/${MAX_RETRIES})`)
-+      this.setSectionDirty(new Vec3(sx, sy, sz), true)
++      this._dispatchDirtyImmediate(new Vec3(sx, sy, sz), true, false) // webplay fix: dispatch directly. setSectionDirty() early-returns when a column is past viewDistance, but keepChunksDistance keeps columns loaded in a ring BEYOND viewDistance -- that no-op left the section neither waiting nor finished, so the column never finished and the WASM batch gate hid it forever.
 +    }
 +  }
 +
